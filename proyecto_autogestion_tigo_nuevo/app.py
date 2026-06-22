@@ -173,6 +173,194 @@ def construir_socios(texto_extra: str = "") -> dict[str, str]:
     return socios
 
 
+# Objetivos base tomados del formato Objetivo.xlsx:
+# POS_CODE = EH, POS_OWNER = Socio, BU JUNIO = Objetivo.
+OBJETIVOS_BASE = [
+    ("91207", "GUALBERTO FERNANDO SANJINES", "PYME DIGITAL", 5),
+    ("91208", "DANNY QUISBERT MENDOZA", "PYME DIGITAL", 5),
+    ("88874", "GUSTAVO CALLEJAS", "PYME DIGITAL", 10),
+    ("88463", "ALICIA GRACIELA ZAMORA BUEZO", "PYME DIGITAL", 30),
+    ("86963", "TERESA CHIPANA", "PYME DIGITAL", 10),
+    ("79030", "VICTOR HUGO CHAMBILLA FLORES", "PYME DIGITAL", 5),
+    ("88426", "SONIA NOEMI MAYTA", "PYME DIGITAL", 20),
+    ("91262", "WARNES RIVERA CHUQUIMIA", "SOCIO HOGAR", 10),
+    ("91283", "SOLAGEL QUENTA GUTIERREZ", "SOCIO HOGAR", 10),
+    ("89859", "JOSE PABLO FERNANDEZ", "SOCIO HOGAR", 30),
+    ("89326", "PALMIRA SELAES", "SOCIO HOGAR", 20),
+    ("83457", "ESTRELLA BELEN QUISPE FLORES", "SOCIO HOGAR", 25),
+    ("63483", "FRANKLIN RAMIRO QUISPE ROSAS", "SOCIO HOGAR", 40),
+    ("72210", "GUADALUPE APAZA VILA", "SOCIO HOGAR", 20),
+    ("59509", "ADRIANA PAOLA VILLAFUERTE GUERRA", "SOCIO HOGAR", 75),
+    ("58984", "MARIA SURCO ARUQUIPA", "SOCIO HOGAR", 25),
+    ("89231", "ALEX RUDY MAMANI GUARACHI", "SOCIO HOGAR", 15),
+    ("86737", "ANAHI OINCA", "SOCIO HOGAR", 10),
+    ("78340", "OLIVIA SANCHEZ QUISPE", "SOCIO HOGAR", 15),
+    ("78099", "GEOVANA CARLA SIÑANI LUNA", "SOCIO HOGAR", 20),
+]
+
+
+def objetivos_default_df() -> pd.DataFrame:
+    return pd.DataFrame(OBJETIVOS_BASE, columns=["EH", "Socio", "Categoria", "Objetivo"])
+
+
+def normalizar_objetivos_archivo(df_obj_original: pd.DataFrame) -> pd.DataFrame:
+    """Lee objetivos en distintos formatos.
+
+    Formato principal esperado del archivo Objetivo.xlsx:
+    POS_CODE, POS_OWNER, CATEGORIA, BU JUNIO.
+    """
+    df_obj = normalizar_dataframe(df_obj_original)
+
+    col_eh = buscar_columna(df_obj, [
+        "EH", "VENDEDOR_EH", "CODIGO_EH", "COD_EH", "EHUMANO", "CA",
+        "POS_CODE", "POS CODE", "CODIGO", "CODIGO_SOCIO", "CODIGO VENDEDOR",
+    ])
+    col_socio = buscar_columna(df_obj, [
+        "SOCIO", "VENDEDOR_NOMBRE", "NOMBRE_VENDEDOR", "NOMBRE_SOCIO", "VENDEDOR",
+        "POS_OWNER", "POS OWNER", "NOMBRE", "CA_NOMBRE",
+    ])
+    col_categoria = buscar_columna(df_obj, ["CATEGORIA", "CATEGORÍA", "TIPO_SOCIO", "TIPO"])
+    col_obj = buscar_columna(df_obj, [
+        "OBJETIVO", "META", "CUOTA", "TARGET", "BU JUNIO", "BU_JUNIO", "JUNIO", "BU",
+        "OBJETIVO_JUNIO", "META_JUNIO",
+    ])
+
+    if col_eh is None:
+        raise ValueError(
+            "No se encontró la columna de EH/código. Para tu archivo de objetivos se acepta POS_CODE como EH. "
+            "Columnas detectadas: " + ", ".join(df_obj.columns[:80])
+        )
+    if col_obj is None:
+        raise ValueError(
+            "No se encontró la columna de objetivo/meta. Para tu archivo se acepta BU JUNIO como objetivo. "
+            "Columnas detectadas: " + ", ".join(df_obj.columns[:80])
+        )
+
+    salida = pd.DataFrame({
+        "EH": df_obj[col_eh].apply(limpiar_eh),
+        "Socio": df_obj[col_socio].apply(limpiar_texto) if col_socio else "",
+        "Categoria": df_obj[col_categoria].apply(limpiar_texto) if col_categoria else "",
+        "Objetivo": pd.to_numeric(df_obj[col_obj], errors="coerce").fillna(0).astype(int),
+    })
+    salida = salida[salida["EH"].astype(str).str.strip().ne("")].copy()
+    salida = salida[salida["Objetivo"].fillna(0).astype(int) >= 0].copy()
+
+    # Completar nombre con el maestro si viene vacío.
+    salida["Socio"] = salida.apply(
+        lambda r: r["Socio"] or SOCIOS_EH_DEFAULT.get(str(r["EH"]), "SIN NOMBRE"), axis=1
+    )
+
+    # Si hay EH repetidos, suma objetivos y conserva el primer nombre/categoría.
+    salida = (
+        salida.groupby("EH", as_index=False)
+        .agg({"Socio": "first", "Categoria": "first", "Objetivo": "sum"})
+        .sort_values(["Categoria", "Socio", "EH"])
+        .reset_index(drop=True)
+    )
+    return salida
+
+
+def get_objetivos_df() -> pd.DataFrame:
+    if "objetivos_df" not in st.session_state:
+        st.session_state["objetivos_df"] = objetivos_default_df()
+    return st.session_state["objetivos_df"].copy()
+
+
+def set_objetivos_df(df_obj: pd.DataFrame) -> None:
+    limpio = df_obj.copy()
+    if "EH" in limpio.columns:
+        limpio["EH"] = limpio["EH"].apply(limpiar_eh)
+    if "Objetivo" in limpio.columns:
+        limpio["Objetivo"] = pd.to_numeric(limpio["Objetivo"], errors="coerce").fillna(0).astype(int)
+    st.session_state["objetivos_df"] = limpio
+
+
+def objetivos_maps() -> tuple[dict[str, int], dict[str, str], dict[str, str]]:
+    obj = get_objetivos_df()
+    obj["EH"] = obj["EH"].apply(limpiar_eh)
+    obj["Objetivo"] = pd.to_numeric(obj.get("Objetivo", 0), errors="coerce").fillna(0).astype(int)
+    objetivo_map = dict(zip(obj["EH"], obj["Objetivo"]))
+    socio_map = dict(zip(obj["EH"], obj.get("Socio", pd.Series([""] * len(obj))).fillna("")))
+    categoria_map = dict(zip(obj["EH"], obj.get("Categoria", pd.Series([""] * len(obj))).fillna("")))
+    return objetivo_map, socio_map, categoria_map
+
+
+def cargar_objetivos_widget(key_prefix: str) -> None:
+    with st.expander("🎯 Objetivos cargados", expanded=False):
+        st.caption("Tu archivo Objetivo.xlsx usa POS_CODE como EH, POS_OWNER como socio y BU JUNIO como objetivo.")
+        archivo_obj = st.file_uploader(
+            "Subir/actualizar archivo de objetivos",
+            type=["csv", "xlsx", "xls"],
+            key=f"{key_prefix}_objetivos_uploader",
+        )
+        if archivo_obj is not None:
+            try:
+                df_obj_original = leer_archivo(archivo_obj)
+                df_obj = normalizar_objetivos_archivo(df_obj_original)
+                set_objetivos_df(df_obj)
+                st.success(f"Objetivos cargados correctamente: {len(df_obj)} socios.")
+            except Exception as exc:
+                st.error(f"No se pudo cargar objetivos: {exc}")
+        st.dataframe(get_objetivos_df(), use_container_width=True, hide_index=True)
+
+
+def construir_detalle_comercial(df_filtro: pd.DataFrame) -> pd.DataFrame:
+    objetivo_map, socio_obj_map, _ = objetivos_maps()
+    detalle = pd.DataFrame({
+        "Código cliente": df_filtro["_codigo"],
+        "EH": df_filtro["_eh"],
+        "Socio": df_filtro.apply(
+            lambda r: r["_socio"] or socio_obj_map.get(str(r["_eh"]), SOCIOS_EH_DEFAULT.get(str(r["_eh"]), "SIN NOMBRE")),
+            axis=1,
+        ),
+        "Tipo venta": df_filtro["_tipo_venta"],
+        "Nodo": df_filtro["_nodo"],
+        "Fecha": df_filtro["_fecha_base"],
+        "Cliente": df_filtro["_cliente"],
+        "Teléfono 1": df_filtro["_telefono1"],
+        "Teléfono 2": df_filtro["_telefono2"],
+    })
+    detalle = detalle[detalle["Código cliente"].astype(str).str.strip().ne("")].copy()
+    detalle["Es Crosselling"] = detalle["Tipo venta"].fillna("").astype(str).str.upper().str.contains("CROSS")
+    detalle["Es GrossAdd"] = detalle["Tipo venta"].fillna("").astype(str).str.upper().str.contains("GROSS")
+    # Regla solicitada: Crosselling NO suma al objetivo.
+    detalle["Venta objetivo"] = ~detalle["Es Crosselling"]
+    return detalle.reset_index(drop=True)
+
+
+def construir_ranking_objetivos(detalle: pd.DataFrame) -> pd.DataFrame:
+    objetivo_map, socio_obj_map, categoria_map = objetivos_maps()
+    columnas = ["EH", "Socio", "Categoria", "Ventas objetivo", "Crosselling", "GrossAdd", "Total ventas", "Objetivo", "Cumplimiento %"]
+    if detalle.empty:
+        return pd.DataFrame(columns=columnas)
+
+    ranking = (
+        detalle.groupby(["EH", "Socio"], as_index=False)
+        .agg(
+            **{
+                "Ventas objetivo": ("Venta objetivo", "sum"),
+                "Crosselling": ("Es Crosselling", "sum"),
+                "GrossAdd": ("Es GrossAdd", "sum"),
+                "Total ventas": ("Código cliente", "count"),
+            }
+        )
+    )
+    ranking["EH"] = ranking["EH"].apply(limpiar_eh)
+    ranking["Socio"] = ranking.apply(
+        lambda r: r["Socio"] if str(r["Socio"]).strip() and str(r["Socio"]).upper() != "SIN NOMBRE" else socio_obj_map.get(r["EH"], "SIN NOMBRE"),
+        axis=1,
+    )
+    ranking["Categoria"] = ranking["EH"].map(categoria_map).fillna("")
+    ranking["Objetivo"] = ranking["EH"].map(objetivo_map).fillna(0).astype(int)
+    ranking["Cumplimiento"] = ranking.apply(
+        lambda r: (float(r["Ventas objetivo"]) / float(r["Objetivo"])) if float(r["Objetivo"] or 0) > 0 else 0,
+        axis=1,
+    )
+    ranking["Cumplimiento %"] = (ranking["Cumplimiento"] * 100).round(1).astype(str) + "%"
+    ranking = ranking.sort_values(["Ventas objetivo", "Crosselling", "Total ventas"], ascending=[False, False, False]).reset_index(drop=True)
+    return ranking[columnas]
+
+
 def nombre_corto(nombre: str) -> str:
     partes = str(nombre).split()
     return " ".join(partes[:2]) if len(partes) >= 2 else str(nombre)
@@ -848,7 +1036,9 @@ def _preparar_base_comercial(df_original: pd.DataFrame) -> tuple[pd.DataFrame, d
 
 def mostrar_dashboard() -> None:
     st.title("📊 Dashboard de Ventas")
-    st.caption("Carga tu archivo de ventas/instalados para ver ranking, gross, crosselling y resumen para WhatsApp.")
+    st.caption("Ranking por socio con regla: Crosselling no suma al objetivo.")
+
+    cargar_objetivos_widget("dash")
 
     archivo = st.file_uploader("📤 Subir archivo de ventas / GrossAdd", type=["csv", "xlsx", "xls"], key="dash_uploader")
     if archivo is None:
@@ -863,7 +1053,6 @@ def mostrar_dashboard() -> None:
         return
 
     st.success(f"Archivo leído correctamente: {len(df_original)} filas y {len(df_original.columns)} columnas.")
-
     with st.expander("Diagnóstico de columnas", expanded=False):
         st.json(columnas)
 
@@ -881,65 +1070,57 @@ def mostrar_dashboard() -> None:
         if eh_sel != "Todos":
             df_filtro = df_filtro[df_filtro["_eh"].astype(str) == eh_sel]
 
-    total = len(df_filtro)
-    gross = int(df_filtro["_tipo_venta"].str.contains("GROSS", na=False).sum()) if "_tipo_venta" in df_filtro.columns else 0
-    cross = int(df_filtro["_tipo_venta"].str.contains("CROSS", na=False).sum()) if "_tipo_venta" in df_filtro.columns else 0
-    instalados = int(df_filtro["_fecha_instalacion"].notna().sum()) if "_fecha_instalacion" in df_filtro.columns else total
+    detalle = construir_detalle_comercial(df_filtro)
+    ranking = construir_ranking_objetivos(detalle)
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total registros", total)
-    k2.metric("GrossAdd", gross)
+    total = len(detalle)
+    ventas_obj = int(detalle["Venta objetivo"].sum()) if not detalle.empty else 0
+    cross = int(detalle["Es Crosselling"].sum()) if not detalle.empty else 0
+    gross = int(detalle["Es GrossAdd"].sum()) if not detalle.empty else 0
+    objetivo_total = int(ranking["Objetivo"].sum()) if not ranking.empty else 0
+    cumplimiento = (ventas_obj / objetivo_total * 100) if objetivo_total > 0 else 0
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Total ventas", total)
+    k2.metric("Ventas objetivo", ventas_obj)
     k3.metric("Crosselling", cross)
-    k4.metric("Instalados", instalados)
+    k4.metric("Objetivo", objetivo_total)
+    k5.metric("Cumplimiento", f"{cumplimiento:.1f}%")
 
-    if df_filtro.empty:
+    if detalle.empty:
         st.warning("No hay datos con los filtros seleccionados.")
         return
 
-    detalle = pd.DataFrame({
-        "Código cliente": df_filtro["_codigo"],
-        "EH": df_filtro["_eh"],
-        "Socio": df_filtro.apply(lambda r: r["_socio"] or SOCIOS_EH_DEFAULT.get(r["_eh"], "SIN NOMBRE"), axis=1),
-        "Tipo venta": df_filtro["_tipo_venta"],
-        "Nodo": df_filtro["_nodo"],
-        "Fecha": df_filtro["_fecha_base"],
-        "Cliente": df_filtro["_cliente"],
-        "Teléfono 1": df_filtro["_telefono1"],
-        "Teléfono 2": df_filtro["_telefono2"],
-    })
-
-    ranking = (
-        detalle.groupby(["EH", "Socio"], as_index=False)["Código cliente"]
-        .count()
-        .rename(columns={"Código cliente": "Total ventas"})
-        .sort_values("Total ventas", ascending=False)
-        .reset_index(drop=True)
-    )
-
     st.subheader("🏆 Ranking por socio")
+    st.caption("Ventas objetivo = total de ventas sin Crosselling. Crosselling se muestra separado y no suma al objetivo.")
     st.dataframe(ranking, use_container_width=True, hide_index=True)
 
     st.subheader("📋 Detalle")
-    st.dataframe(detalle, use_container_width=True, hide_index=True)
+    st.dataframe(detalle.drop(columns=["Venta objetivo", "Es Crosselling", "Es GrossAdd"], errors="ignore"), use_container_width=True, hide_index=True)
 
     lineas = [
-        "📊 *RESUMEN DE VENTAS / INSTALADOS*",
-        f"🔢 Total registros: *{total}*",
-        f"🏠 GrossAdd: *{gross}*",
+        "📊 *RESUMEN DE VENTAS*",
+        f"🔢 Total ventas: *{total}*",
+        f"🎯 Ventas objetivo: *{ventas_obj}*",
         f"🔁 Crosselling: *{cross}*",
+        f"📌 Objetivo: *{objetivo_total}*",
+        f"📈 Cumplimiento: *{cumplimiento:.1f}%*",
         "",
         "🏆 *Ranking por socio:*",
     ]
     for i, (_, r) in enumerate(ranking.iterrows(), start=1):
         icono = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔹"
-        lineas.append(f"{icono} {r['EH']} - {nombre_corto(r['Socio'])}: *{int(r['Total ventas'])}*")
+        lineas.append(
+            f"{icono} {r['EH']} - {nombre_corto(r['Socio'])}: "
+            f"*{int(r['Ventas objetivo'])}/{int(r['Objetivo'])}* ({r['Cumplimiento %']}) | Cross: *{int(r['Crosselling'])}*"
+        )
     texto = "\n".join(lineas)
 
     st.subheader("📲 Mensaje WhatsApp")
-    st.text_area("Copiar mensaje", texto, height=280, key="dash_msg")
+    st.text_area("Copiar mensaje", texto, height=330, key="dash_msg")
     st.markdown(f"[📲 Enviar por WhatsApp]({whatsapp_link(texto)})")
 
-    excel = excel_bytes({"Ranking": ranking, "Detalle": detalle})
+    excel = excel_bytes({"Ranking": ranking, "Detalle": detalle, "Objetivos": get_objetivos_df()})
     st.download_button(
         "⬇️ Descargar Excel",
         data=excel,
@@ -954,7 +1135,9 @@ def mostrar_dashboard() -> None:
 # =========================================================
 def mostrar_whatsapp() -> None:
     st.title("📲 WhatsApp / Reporte por Socio")
-    st.caption("Genera mensajes rápidos desde un archivo cargado. Útil para ranking, pendientes o seguimiento por socio.")
+    st.caption("Genera reportes con objetivos, ventas objetivo y crosselling separado.")
+
+    cargar_objetivos_widget("wa")
 
     plantilla = st.selectbox(
         "Tipo de mensaje",
@@ -974,47 +1157,56 @@ def mostrar_whatsapp() -> None:
         st.error(f"No se pudo procesar el archivo: {exc}")
         return
 
-    detalle = pd.DataFrame({
-        "Código cliente": df["_codigo"],
-        "EH": df["_eh"],
-        "Socio": df.apply(lambda r: r["_socio"] or SOCIOS_EH_DEFAULT.get(r["_eh"], "SIN NOMBRE"), axis=1),
-        "Nodo": df["_nodo"],
-        "Tipo venta": df["_tipo_venta"],
-        "Cliente": df["_cliente"],
-        "Teléfono 1": df["_telefono1"],
-        "Teléfono 2": df["_telefono2"],
-        "Fecha": df["_fecha_base"],
-    })
-    detalle = detalle[detalle["Código cliente"].astype(str).str.strip() != ""]
-
+    detalle = construir_detalle_comercial(df)
     if detalle.empty:
         st.warning("No se encontraron códigos de cliente en el archivo.")
         return
+
+    ranking = construir_ranking_objetivos(detalle)
 
     if plantilla == "Detalle por socio":
         socios_opciones = sorted(detalle["Socio"].dropna().unique().tolist())
         socio_sel = st.selectbox("Seleccionar socio", socios_opciones, key="wa_socio")
         detalle = detalle[detalle["Socio"] == socio_sel]
+        ranking = construir_ranking_objetivos(detalle)
 
-    st.dataframe(detalle, use_container_width=True, hide_index=True)
+    st.dataframe(detalle.drop(columns=["Venta objetivo", "Es Crosselling", "Es GrossAdd"], errors="ignore"), use_container_width=True, hide_index=True)
 
     if plantilla == "Resumen general":
-        resumen = detalle.groupby(["EH", "Socio"], as_index=False)["Código cliente"].count().rename(columns={"Código cliente": "Casos"})
+        total = len(detalle)
+        ventas_obj = int(detalle["Venta objetivo"].sum())
+        cross = int(detalle["Es Crosselling"].sum())
+        objetivo_total = int(ranking["Objetivo"].sum()) if not ranking.empty else 0
+        cumplimiento = (ventas_obj / objetivo_total * 100) if objetivo_total > 0 else 0
         lineas = [
             "📌 *REPORTE GENERAL*",
-            f"🔢 Total casos: *{len(detalle)}*",
+            f"🔢 Total ventas: *{total}*",
+            f"🎯 Ventas objetivo: *{ventas_obj}*",
+            f"🔁 Crosselling: *{cross}*",
+            f"📌 Objetivo: *{objetivo_total}*",
+            f"📈 Cumplimiento: *{cumplimiento:.1f}%*",
             "",
             "📋 *Resumen por socio:*",
         ]
-        for _, r in resumen.sort_values("Casos", ascending=False).iterrows():
-            lineas.append(f"🔹 {r['EH']} - {nombre_corto(r['Socio'])}: *{int(r['Casos'])}*")
+        for i, (_, r) in enumerate(ranking.iterrows(), start=1):
+            icono = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔹"
+            lineas.append(
+                f"{icono} {r['EH']} - {nombre_corto(r['Socio'])}: "
+                f"*{int(r['Ventas objetivo'])}/{int(r['Objetivo'])}* ({r['Cumplimiento %']}) | Cross: *{int(r['Crosselling'])}*"
+            )
     elif plantilla == "Detalle por socio":
         socio = detalle.iloc[0]["Socio"] if not detalle.empty else ""
         eh = detalle.iloc[0]["EH"] if not detalle.empty else ""
+        ventas_obj = int(detalle["Venta objetivo"].sum()) if not detalle.empty else 0
+        cross = int(detalle["Es Crosselling"].sum()) if not detalle.empty else 0
+        objetivo = int(ranking.iloc[0]["Objetivo"]) if not ranking.empty else 0
+        cumplimiento = (ventas_obj / objetivo * 100) if objetivo > 0 else 0
         lineas = [
             "📌 *REPORTE DE SEGUIMIENTO*",
             f"👤 Socio: *{socio}*",
             f"🆔 EH: *{eh or 'S/D'}*",
+            f"🎯 Ventas objetivo: *{ventas_obj}/{objetivo}* ({cumplimiento:.1f}%)",
+            f"🔁 Crosselling: *{cross}*",
             f"🔢 Total casos: *{len(detalle)}*",
             "",
             "📋 *Código | Nodo | Tipo*",
@@ -1035,7 +1227,7 @@ def mostrar_whatsapp() -> None:
     texto = "\n".join(lineas)
 
     st.subheader("Mensaje WhatsApp")
-    st.text_area("Copiar mensaje", texto, height=350, key="wa_msg")
+    st.text_area("Copiar mensaje", texto, height=380, key="wa_msg")
     st.markdown(f"[📲 Enviar por WhatsApp]({whatsapp_link(texto)})")
 
 
@@ -1145,37 +1337,38 @@ def mostrar_pendientes_pago() -> None:
 # =========================================================
 def mostrar_objetivos_configuracion() -> None:
     st.title("🎯 Objetivos Configuración")
-    st.caption("Carga, edita y exporta objetivos por socio. Esta versión guarda los cambios solo durante la sesión.")
+    st.caption("Carga el archivo Objetivo.xlsx. Formato soportado: POS_CODE, POS_OWNER, CATEGORIA y BU JUNIO.")
 
-    default_df = pd.DataFrame({
-        "EH": list(SOCIOS_EH_DEFAULT.keys()),
-        "Socio": list(SOCIOS_EH_DEFAULT.values()),
-        "Objetivo": [0] * len(SOCIOS_EH_DEFAULT),
-    })
-
-    archivo = st.file_uploader("📤 Opcional: subir archivo de objetivos", type=["csv", "xlsx", "xls"], key="obj_uploader")
+    archivo = st.file_uploader("📤 Subir archivo de objetivos", type=["csv", "xlsx", "xls"], key="obj_uploader")
     if archivo is not None:
         try:
-            df_obj = leer_archivo(archivo)
-            df_obj = normalizar_dataframe(df_obj)
-            col_eh = buscar_columna(df_obj, ["EH", "VENDEDOR_EH", "CODIGO_EH"])
-            col_socio = buscar_columna(df_obj, ["SOCIO", "VENDEDOR_NOMBRE", "NOMBRE"])
-            col_obj = buscar_columna(df_obj, ["OBJETIVO", "META", "CUOTA"])
-            if col_eh is None:
-                raise ValueError("No se encontró columna EH.")
-            default_df = pd.DataFrame({
-                "EH": df_obj[col_eh].apply(limpiar_eh),
-                "Socio": df_obj[col_socio].apply(limpiar_texto) if col_socio else "",
-                "Objetivo": pd.to_numeric(df_obj[col_obj], errors="coerce").fillna(0).astype(int) if col_obj else 0,
-            })
+            df_obj_original = leer_archivo(archivo)
+            df_obj = normalizar_objetivos_archivo(df_obj_original)
+            set_objetivos_df(df_obj)
+            st.success(f"Objetivos cargados correctamente: {len(df_obj)} socios.")
         except Exception as exc:
             st.error(f"No se pudo leer objetivos: {exc}")
+            try:
+                st.write("Columnas detectadas:", list(normalizar_dataframe(leer_archivo(archivo)).columns))
+            except Exception:
+                pass
 
-    editado = st.data_editor(default_df, use_container_width=True, hide_index=True, num_rows="dynamic", key="objetivos_editor")
+    default_df = get_objetivos_df()
+    editado = st.data_editor(
+        default_df,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        key="objetivos_editor",
+    )
+    if editado is not None:
+        set_objetivos_df(editado)
+
+    objetivos = get_objetivos_df()
     st.subheader("📋 Objetivos configurados")
-    st.dataframe(editado, use_container_width=True, hide_index=True)
+    st.dataframe(objetivos, use_container_width=True, hide_index=True)
 
-    total_obj = int(pd.to_numeric(editado.get("Objetivo", 0), errors="coerce").fillna(0).sum()) if not editado.empty else 0
+    total_obj = int(pd.to_numeric(objetivos.get("Objetivo", 0), errors="coerce").fillna(0).sum()) if not objetivos.empty else 0
     st.metric("Objetivo total", total_obj)
 
     lineas = [
@@ -1184,7 +1377,7 @@ def mostrar_objetivos_configuracion() -> None:
         f"🔢 Objetivo total: *{total_obj}*",
         "",
     ]
-    for _, r in editado.iterrows():
+    for _, r in objetivos.iterrows():
         try:
             obj = int(r.get("Objetivo", 0))
         except Exception:
@@ -1194,10 +1387,10 @@ def mostrar_objetivos_configuracion() -> None:
     texto = "\n".join(lineas)
 
     st.subheader("📲 Mensaje WhatsApp")
-    st.text_area("Copiar mensaje", texto, height=250, key="obj_msg")
+    st.text_area("Copiar mensaje", texto, height=270, key="obj_msg")
     st.markdown(f"[📲 Enviar por WhatsApp]({whatsapp_link(texto)})")
 
-    excel = excel_bytes({"Objetivos": editado})
+    excel = excel_bytes({"Objetivos": objetivos})
     st.download_button(
         "⬇️ Descargar objetivos",
         data=excel,

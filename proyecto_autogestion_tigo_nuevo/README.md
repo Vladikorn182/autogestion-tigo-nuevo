@@ -1,34 +1,23 @@
-# Autogestión Tigo - Proyecto nuevo limpio
+# Autogestión Tigo - Proyecto corregido
 
 Proyecto Streamlit en un solo archivo.
 
 ## Archivos necesarios
+- app.py
+- requirements.txt
+- README.md
 
-- `app.py`
-- `requirements.txt`
+## Correcciones incluidas
+- El archivo Objetivo.xlsx ahora carga con columnas POS_CODE, POS_OWNER, CATEGORIA y BU JUNIO.
+- Dashboard y WhatsApp calculan ranking por socio con:
+  - Ventas objetivo
+  - Crosselling separado
+  - Total ventas
+  - Objetivo
+  - Cumplimiento %
+- Regla aplicada: Crosselling no suma al objetivo.
 
-No usa carpeta `pages` ni módulos externos.
+## Streamlit Cloud
+Main file path:
 
-## Deploy en Streamlit Cloud
-
-1. Crea un repositorio nuevo en GitHub.
-2. Sube solo `app.py` y `requirements.txt`.
-3. En Streamlit Cloud crea una nueva app.
-4. Selecciona el repositorio nuevo.
-5. En Main file path coloca: `app.py`.
-6. Presiona Deploy.
-
-## Módulos incluidos
-
-- Inicio
-- Dashboard
-- WhatsApp
-- Agenda Técnica
-- Pendientes de Instalación
-- Pendientes Pago
-- Suspendidas
-- Objetivos Configuración
-
-## Importante
-
-No mezclar este proyecto con repositorios antiguos. No subir carpetas `pages`, `modulos`, ni archivos de pruebas anteriores.
+proyecto_autogestion_tigo_nuevo/app.py
