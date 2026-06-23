@@ -1,14 +1,25 @@
-# Autogestión Tigo - Proyecto ajustado
+# Autogestión Tigo - versión ajustada WhatsApp
 
-Versión corregida según observaciones:
+Corrección aplicada:
 
-- Pendientes de instalación con pago: agrupado por socio, +3 días, WhatsApp con código, nodo y fecha.
-- Pendientes de pago: agrupado por socio, WhatsApp sin teléfonos y con fecha.
-- Suspendidas: resumen por socio y mensaje reducido.
-- WhatsApp/Dashboard: ranking contra objetivo de ventas nuevas, crosselling separado.
+- Módulo WhatsApp vuelve a mostrar ranking contra objetivo.
+- Crosselling queda separado y no suma al objetivo.
+- Mensaje por socio con formato:
+  - Ventas objetivo
+  - Crosselling
+  - Total ventas
+  - Objetivo
+  - Cumplimiento
+  - Faltan
+  - Códigos que cuentan al objetivo
+- Opción para generar mensajes separados por socio.
 
-Ruta en Streamlit Cloud:
+Archivos que debes reemplazar en GitHub dentro de la carpeta `proyecto_autogestion_tigo_nuevo/`:
 
-```
-proyecto_autogestion_tigo_nuevo/app.py
-```
+- app.py
+- requirements.txt
+- README.md
+
+La ruta en Streamlit debe seguir siendo:
+
+`proyecto_autogestion_tigo_nuevo/app.py`

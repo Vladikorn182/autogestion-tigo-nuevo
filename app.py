@@ -1190,21 +1190,163 @@ def mostrar_dashboard() -> None:
 # =========================================================
 # MÓDULO: WHATSAPP
 # =========================================================
+def _fecha_guion(valor: object) -> str:
+    """Fecha en formato dd-mm-aaaa para el mensaje comercial."""
+    if valor is None or valor == "" or pd.isna(valor):
+        return "S/F"
+    try:
+        fecha = pd.to_datetime(valor, errors="coerce")
+        if pd.isna(fecha):
+            return "S/F"
+        return fecha.strftime("%d-%m-%Y")
+    except Exception:
+        return "S/F"
+
+
+def _mensaje_motivacional(ventas_obj: int, objetivo: int) -> str:
+    if objetivo <= 0:
+        return "💪 Revisemos el objetivo asignado y sigamos avanzando con el seguimiento."
+    cumplimiento = (ventas_obj / objetivo) * 100
+    if cumplimiento >= 100:
+        return "🏆 Excelente trabajo, objetivo cumplido. Sigamos sumando ventas nuevas."
+    if cumplimiento >= 80:
+        return "🔥 Estamos cerca del objetivo. Prioricemos los cierres pendientes."
+    if cumplimiento >= 50:
+        return "💪 Buen avance. Sigamos empujando las ventas nuevas para llegar al objetivo."
+    return "💪 Sigamos avanzando hacia el objetivo del mes."
+
+
+def _filas_codigos_objetivo(detalle_socio: pd.DataFrame) -> list[str]:
+    codigos_obj = detalle_socio[detalle_socio["Venta objetivo"] == True].copy()
+    codigos_obj = codigos_obj.sort_values(["Fecha", "Código cliente"], ascending=[True, True])
+    lineas: list[str] = []
+    for _, r in codigos_obj.iterrows():
+        codigo = r.get("Código cliente", "") or "S/D"
+        cliente = limpiar_texto(r.get("Cliente", "")) or "SIN NOMBRE"
+        fecha = _fecha_guion(r.get("Fecha", ""))
+        lineas.append(f"🔹 {codigo} | {cliente} | {fecha}")
+    return lineas
+
+
+def _filas_codigos_cross(detalle_socio: pd.DataFrame) -> list[str]:
+    codigos_cross = detalle_socio[detalle_socio["Es Crosselling"] == True].copy()
+    codigos_cross = codigos_cross.sort_values(["Fecha", "Código cliente"], ascending=[True, True])
+    lineas: list[str] = []
+    for _, r in codigos_cross.iterrows():
+        codigo = r.get("Código cliente", "") or "S/D"
+        cliente = limpiar_texto(r.get("Cliente", "")) or "SIN NOMBRE"
+        fecha = _fecha_guion(r.get("Fecha", ""))
+        lineas.append(f"🔸 {codigo} | {cliente} | {fecha}")
+    return lineas
+
+
+def mensaje_avance_socio(detalle_socio: pd.DataFrame, ranking_socio: pd.Series | None = None) -> str:
+    if detalle_socio.empty:
+        return "⚠️ No hay ventas para el socio seleccionado."
+
+    eh = limpiar_eh(detalle_socio.iloc[0].get("EH", ""))
+    socio = limpiar_texto(detalle_socio.iloc[0].get("Socio", "")) or "SIN NOMBRE"
+
+    ventas_obj = int(detalle_socio["Venta objetivo"].sum())
+    cross = int(detalle_socio["Es Crosselling"].sum())
+    total = int(len(detalle_socio))
+
+    if ranking_socio is not None and not ranking_socio.empty:
+        objetivo = int(ranking_socio.get("Objetivo", 0) or 0)
+    else:
+        objetivo_map, _, _ = objetivos_maps()
+        objetivo = int(objetivo_map.get(eh, 0) or 0)
+
+    cumplimiento = (ventas_obj / objetivo * 100) if objetivo > 0 else 0
+    faltan = max(objetivo - ventas_obj, 0)
+
+    lineas = [
+        "📊 *AVANCE DE VENTAS*",
+        "",
+        f"👤 *{socio}*",
+        f"EH: *{eh or 'S/D'}*",
+        "",
+        f"✅ Ventas objetivo: *{ventas_obj}*",
+        f"🔄 Crosselling: *{cross}*",
+        f"📊 Total ventas: *{total}*",
+        "",
+        f"🎯 Objetivo: *{objetivo}*",
+        f"📈 Cumplimiento: *{cumplimiento:.1f}%*",
+        f"⏳ Faltan: *{faltan}*",
+        "",
+        _mensaje_motivacional(ventas_obj, objetivo),
+        "",
+        "✅ *CÓDIGOS QUE CUENTAN AL OBJETIVO:*",
+        "",
+    ]
+
+    codigos_obj = _filas_codigos_objetivo(detalle_socio)
+    if codigos_obj:
+        lineas.extend(codigos_obj)
+    else:
+        lineas.append("Sin códigos que sumen al objetivo.")
+
+    codigos_cross = _filas_codigos_cross(detalle_socio)
+    if codigos_cross:
+        lineas.extend([
+            "",
+            "🔄 *CÓDIGOS CROSSSELLING:*",
+            "_(No suman al objetivo de ventas nuevas)_",
+            "",
+        ])
+        lineas.extend(codigos_cross)
+
+    return "\n".join(lineas)
+
+
+def mensaje_ranking_general(detalle: pd.DataFrame, ranking: pd.DataFrame) -> str:
+    total = int(len(detalle))
+    ventas_obj = int(detalle["Venta objetivo"].sum()) if not detalle.empty else 0
+    cross = int(detalle["Es Crosselling"].sum()) if not detalle.empty else 0
+    objetivo_total = int(ranking["Objetivo"].sum()) if not ranking.empty else 0
+    cumplimiento = (ventas_obj / objetivo_total * 100) if objetivo_total > 0 else 0
+
+    lineas = [
+        "📊 *AVANCE GENERAL DE VENTAS*",
+        "",
+        f"✅ Ventas objetivo: *{ventas_obj}*",
+        f"🔄 Crosselling: *{cross}*",
+        f"📊 Total ventas: *{total}*",
+        "",
+        f"🎯 Objetivo total: *{objetivo_total}*",
+        f"📈 Cumplimiento general: *{cumplimiento:.1f}%*",
+        "",
+        "🏆 *Ranking por socio:*",
+    ]
+
+    for i, (_, r) in enumerate(ranking.iterrows(), start=1):
+        icono = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔹"
+        ventas = int(r.get("Ventas objetivo", 0) or 0)
+        objetivo = int(r.get("Objetivo", 0) or 0)
+        cross_socio = int(r.get("Crosselling", 0) or 0)
+        cumplimiento_socio = r.get("Cumplimiento %", "0%")
+        faltan = max(objetivo - ventas, 0)
+        lineas.append(
+            f"{icono} *{r['EH']}* - {limpiar_nombre_socio_mensaje(r['Socio'])}: "
+            f"*{ventas}/{objetivo}* ({cumplimiento_socio}) | Falta: *{faltan}* | Cross: *{cross_socio}*"
+        )
+
+    lineas += [
+        "",
+        "💪 Equipo, enfoquemos el seguimiento en ventas nuevas para llegar al objetivo. Crosselling se reporta separado.",
+    ]
+    return "\n".join(lineas)
+
+
 def mostrar_whatsapp() -> None:
     st.title("📲 WhatsApp / Reporte por Socio")
-    st.caption("Reporte tipo ranking: ventas nuevas contra objetivo. Crosselling se muestra separado y no suma al objetivo.")
+    st.caption("Avance de ventas contra objetivo. Crosselling queda separado y no suma al objetivo.")
 
     cargar_objetivos_widget("wa")
 
-    plantilla = st.selectbox(
-        "Tipo de mensaje",
-        ["Resumen general", "Detalle por socio", "Lista de códigos"],
-        key="wa_plantilla",
-    )
-
     archivo = st.file_uploader("📤 Subir archivo base", type=["csv", "xlsx", "xls"], key="wa_uploader")
     if archivo is None:
-        st.info("Sube un archivo para generar mensajes automáticos.")
+        st.info("Sube el archivo GrossAdd/ventas para generar mensajes automáticos.")
         return
 
     try:
@@ -1221,80 +1363,75 @@ def mostrar_whatsapp() -> None:
 
     ranking = construir_ranking_objetivos(detalle)
 
-    if plantilla == "Detalle por socio":
-        socios_opciones = sorted(detalle["Socio"].dropna().unique().tolist())
-        socio_sel = st.selectbox("Seleccionar socio", socios_opciones, key="wa_socio")
-        detalle = detalle[detalle["Socio"] == socio_sel]
-        ranking = construir_ranking_objetivos(detalle)
+    st.subheader("🏆 Ranking de ventas a objetivo")
+    st.caption("Ventas objetivo = ventas nuevas. Crosselling se muestra separado y no suma al objetivo.")
+    st.dataframe(ranking, use_container_width=True, hide_index=True)
 
-    st.dataframe(detalle.drop(columns=["Venta objetivo", "Es Crosselling", "Es GrossAdd"], errors="ignore"), use_container_width=True, hide_index=True)
+    tipo = st.selectbox(
+        "Tipo de mensaje",
+        ["Avance por socio", "Ranking general", "Todos los socios separados", "Solo códigos objetivo"],
+        key="wa_tipo_mensaje_v2",
+    )
 
-    if plantilla == "Resumen general":
-        total = len(detalle)
-        ventas_obj = int(detalle["Venta objetivo"].sum())
-        cross = int(detalle["Es Crosselling"].sum())
-        objetivo_total = int(ranking["Objetivo"].sum()) if not ranking.empty else 0
-        cumplimiento = (ventas_obj / objetivo_total * 100) if objetivo_total > 0 else 0
-        lineas = [
-            "📌 *REPORTE GENERAL DE VENTAS*",
-            f"🔢 Total ventas: *{total}*",
-            f"🎯 Ventas nuevas objetivo: *{ventas_obj}*",
-            f"🔁 Crosselling: *{cross}* _(no suma al objetivo)_",
-            f"📌 Objetivo ventas nuevas: *{objetivo_total}*",
-            f"📈 Cumplimiento: *{cumplimiento:.1f}%*",
-            "",
-            "🏆 *Ranking por socio:*",
-        ]
-        for i, (_, r) in enumerate(ranking.iterrows(), start=1):
-            icono = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🔹"
-            objetivo = int(r.get("Objetivo", 0) or 0)
-            ventas = int(r.get("Ventas objetivo", 0) or 0)
-            cross_socio = int(r.get("Crosselling", 0) or 0)
-            avance = r.get("Cumplimiento %", "0%")
-            lineas.append(f"{icono} {r['EH']} - {nombre_corto(r['Socio'])}: *{ventas}/{objetivo}* ({avance}) | Cross: *{cross_socio}*")
-        lineas += [
-            "",
-            "💪 *Mensaje:* Vamos equipo, enfoquemos el seguimiento en ventas nuevas para llegar al objetivo. Los crosselling ayudan al crecimiento, pero se reportan separado.",
-        ]
-    elif plantilla == "Detalle por socio":
-        socio = detalle.iloc[0]["Socio"] if not detalle.empty else ""
-        eh = detalle.iloc[0]["EH"] if not detalle.empty else ""
-        ventas_obj = int(detalle["Venta objetivo"].sum()) if not detalle.empty else 0
-        cross = int(detalle["Es Crosselling"].sum()) if not detalle.empty else 0
-        objetivo = int(ranking.iloc[0]["Objetivo"]) if not ranking.empty else 0
-        cumplimiento = (ventas_obj / objetivo * 100) if objetivo > 0 else 0
-        lineas = [
-            "📌 *REPORTE DE SEGUIMIENTO*",
-            f"👤 Socio: *{socio}*",
-            f"🆔 EH: *{eh or 'S/D'}*",
-            f"🎯 Ventas nuevas objetivo: *{ventas_obj}/{objetivo}* ({cumplimiento:.1f}%)",
-            f"🔁 Crosselling: *{cross}* _(separado del objetivo)_",
-            f"🔢 Total casos: *{len(detalle)}*",
-            "",
-            "📋 *Código | Nodo | Tipo*",
-        ]
-        for i, (_, r) in enumerate(detalle.iterrows(), start=1):
-            lineas.append(f"{i}. {r['Código cliente']} | {r['Nodo'] or 'S/D'} | {r['Tipo venta'] or 'S/D'}")
-        lineas += [
-            "",
-            "💪 Sigamos con el seguimiento para asegurar instalaciones y cumplimiento del objetivo.",
-        ]
-    else:
-        lineas = [
-            "📌 *LISTA DE CÓDIGOS*",
-            f"🔢 Total: *{len(detalle)}*",
-            "",
-        ]
-        for _, r in detalle.iterrows():
-            lineas.append(f"• {r['Código cliente']} | {r['Nodo'] or 'S/D'}")
+    if tipo == "Ranking general":
+        texto = mensaje_ranking_general(detalle, ranking)
+        st.subheader("📲 Mensaje general para grupo")
+        st.text_area("Copiar mensaje", texto, height=420, key="wa_msg_general_v2")
+        st.markdown(f"[📲 Enviar por WhatsApp]({whatsapp_link(texto)})")
+        return
 
-    lineas.append("")
-    lineas.append("✅ Favor realizar seguimiento y reportar avance.")
-    texto = "\n".join(lineas)
+    socios_opciones = [f"{r['EH']} - {r['Socio']}" for _, r in ranking.iterrows()]
+    if not socios_opciones:
+        st.warning("No hay socios para mostrar.")
+        return
 
-    st.subheader("Mensaje WhatsApp")
-    st.text_area("Copiar mensaje", texto, height=420, key="wa_msg")
-    st.markdown(f"[📲 Enviar por WhatsApp]({whatsapp_link(texto)})")
+    if tipo in ["Avance por socio", "Solo códigos objetivo"]:
+        seleccion = st.selectbox("Seleccionar socio", socios_opciones, key="wa_socio_v2")
+        eh_sel = seleccion.split(" - ")[0]
+        detalle_socio = detalle[detalle["EH"].astype(str) == eh_sel].copy()
+        ranking_socio = ranking[ranking["EH"].astype(str) == eh_sel]
+        ranking_row = ranking_socio.iloc[0] if not ranking_socio.empty else None
+
+        st.subheader("📋 Detalle del socio")
+        st.dataframe(
+            detalle_socio[["Código cliente", "EH", "Socio", "Tipo venta", "Nodo", "Fecha", "Cliente"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        if tipo == "Avance por socio":
+            texto = mensaje_avance_socio(detalle_socio, ranking_row)
+        else:
+            lineas = [
+                "✅ *CÓDIGOS QUE CUENTAN AL OBJETIVO*",
+                "",
+                f"👤 *{detalle_socio.iloc[0]['Socio']}*",
+                f"EH: *{eh_sel}*",
+                "",
+            ]
+            codigos = _filas_codigos_objetivo(detalle_socio)
+            lineas.extend(codigos if codigos else ["Sin códigos que sumen al objetivo."])
+            texto = "\n".join(lineas)
+
+        st.subheader("📲 Mensaje WhatsApp")
+        st.text_area("Copiar mensaje", texto, height=520, key="wa_msg_socio_v2")
+        st.markdown(f"[📲 Enviar por WhatsApp]({whatsapp_link(texto)})")
+        return
+
+    # Todos los socios separados: genera un mensaje individual por cada socio.
+    st.subheader("📲 Mensajes separados por socio")
+    st.info("Cada socio tiene su propio mensaje y su propio enlace de WhatsApp. Usa esto para enviar los códigos por separado.")
+
+    for _, r in ranking.iterrows():
+        eh = str(r["EH"])
+        detalle_socio = detalle[detalle["EH"].astype(str) == eh].copy()
+        if detalle_socio.empty:
+            continue
+        texto = mensaje_avance_socio(detalle_socio, r)
+        titulo = f"{r['EH']} - {limpiar_nombre_socio_mensaje(r['Socio'])} | {int(r['Ventas objetivo'])}/{int(r['Objetivo'])} | Cross {int(r['Crosselling'])}"
+        with st.expander(titulo, expanded=False):
+            st.text_area("Mensaje", texto, height=420, key=f"wa_msg_todos_{eh}")
+            st.markdown(f"[📲 Enviar por WhatsApp]({whatsapp_link(texto)})")
 
 # =========================================================
 # MÓDULO: PENDIENTES DE PAGO
