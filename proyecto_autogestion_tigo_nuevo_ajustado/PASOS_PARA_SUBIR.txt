@@ -1,0 +1,9 @@
+1. Descomprime este ZIP.
+2. En GitHub entra a tu repositorio autogestion-tigo-nuevo.
+3. Entra a la carpeta proyecto_autogestion_tigo_nuevo.
+4. Reemplaza app.py, requirements.txt y README.md con los archivos de este paquete.
+5. Commit changes.
+6. En Streamlit Cloud presiona Reboot app.
+
+Main file path:
+proyecto_autogestion_tigo_nuevo/app.py
